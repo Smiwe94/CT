@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xsi:type="TaskPaneApp">
+  <Id>1c3a5ac2-9a8a-4e7c-a7dc-9c3c7f0a2e64</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>CronosTask</ProviderName>
+  <DefaultLocale>es-ES</DefaultLocale>
+  <DisplayName DefaultValue="Actividades Cronograma" />
+  <Description DefaultValue="Administrador de actividades con sincronización a Excel en OneDrive." />
+  <Hosts>
+    <Host Name="Workbook" />
+  </Hosts>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/Actividades.html" />
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+  <SupportUrl DefaultValue="https://localhost:3000" />
+</OfficeApp>
