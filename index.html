@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cronograma de Trabajo | SPRC</title>
     
-    <!-- Scripts base -->
+    <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -19,7 +19,7 @@
             theme: {
                 extend: {
                     colors: {
-                        brand: { 50: '#f0f9ff', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1' }
+                        brand: { 50: '#f0f9ff', 100: '#e0f2fe', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1' }
                     }
                 }
             }
@@ -29,7 +29,9 @@
     <style>
         .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
-        .gantt-row:hover { background-color: rgba(243, 244, 246, 0.5); }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #475569; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 dark:bg-slate-900 dark:text-gray-100 transition-colors duration-300">
@@ -38,7 +40,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, useMemo } = React;
 
-        // --- Componente Icono ---
+        // --- Iconos ---
         const Icon = ({ name, size = 20, className = "" }) => {
             const ref = useRef(null);
             useEffect(() => {
@@ -57,23 +59,28 @@
             Plus: (p) => <Icon name="Plus" {...p} />,
             Trash2: (p) => <Icon name="Trash2" {...p} />,
             Edit2: (p) => <Icon name="Edit2" {...p} />,
+            Calendar: (p) => <Icon name="Calendar" {...p} />,
+            CheckSquare: (p) => <Icon name="CheckSquare" {...p} />,
             Save: (p) => <Icon name="Save" {...p} />,
             X: (p) => <Icon name="X" {...p} />,
+            Moon: (p) => <Icon name="Moon" {...p} />,
+            Sun: (p) => <Icon name="Sun" {...p} />,
             ExternalLink: (p) => <Icon name="ExternalLink" {...p} />,
-            BarChart3: (p) => <Icon name="BarChart3" {...p} />,
             LayoutGrid: (p) => <Icon name="LayoutGrid" {...p} />,
+            BarChart3: (p) => <Icon name="BarChart3" {...p} />,
+            ChevronDown: (p) => <Icon name="ChevronDown" {...p} />,
+            ChevronUp: (p) => <Icon name="ChevronUp" {...p} />,
         };
 
-        // --- Vista Gantt con Progreso Visual ---
+        // --- Vista Gantt Mejorada con Llenado Visual ---
         const GanttView = ({ tasks, onEdit }) => {
             const { dates, minDate } = useMemo(() => {
-                const now = new Date();
-                if (tasks.length === 0) return { dates: Array.from({length: 14}, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; }), minDate: now };
+                if (tasks.length === 0) return { dates: [], minDate: new Date() };
                 const allDates = tasks.flatMap(t => [new Date(t.fechaInicio), new Date(t.fechaFin)]);
                 const min = new Date(Math.min(...allDates));
                 min.setDate(min.getDate() - 2);
                 const max = new Date(Math.max(...allDates));
-                max.setDate(max.getDate() + 5);
+                max.setDate(max.getDate() + 7);
                 const arr = [];
                 for(let d = new Date(min); d <= max; d.setDate(d.getDate() + 1)) arr.push(new Date(d));
                 return { dates: arr, minDate: min };
@@ -82,45 +89,42 @@
             const dayWidth = 40;
 
             return (
-                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col h-[500px]">
-                    <div className="overflow-auto custom-scrollbar relative flex-1">
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden flex flex-col h-[600px]">
+                    <div className="flex-1 overflow-auto custom-scrollbar relative">
                         <div style={{ width: `${dates.length * dayWidth + 200}px` }}>
-                            {/* Header fechas */}
-                            <div className="flex sticky top-0 z-20 bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700">
-                                <div className="sticky left-0 w-48 bg-gray-50 dark:bg-slate-800 p-2 font-bold text-xs border-r z-30">Tarea</div>
+                            <div className="flex sticky top-0 z-20 bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 h-10">
+                                <div className="sticky left-0 w-52 bg-gray-50 dark:bg-slate-800 border-r p-2 font-bold text-xs z-30">Tarea</div>
                                 {dates.map((d, i) => (
-                                    <div key={i} className="text-[10px] text-center border-r border-gray-200 dark:border-slate-700 py-1 flex-shrink-0" style={{ width: dayWidth }}>
-                                        {d.getDate()}<br/>{d.toLocaleDateString('es', {month: 'short'})}
+                                    <div key={i} className="flex-shrink-0 border-r border-gray-100 dark:border-slate-700 text-[10px] text-center flex items-center justify-center" style={{ width: dayWidth }}>
+                                        {d.getDate()}
                                     </div>
                                 ))}
                             </div>
-
-                            {/* Filas */}
                             {tasks.map(task => {
                                 const start = new Date(task.fechaInicio);
                                 const end = new Date(task.fechaFin);
-                                const offset = Math.max(0, Math.floor((start - minDate) / (86400000)));
-                                const duration = Math.max(1, Math.ceil((end - start) / (86400000)) + 1);
+                                const offset = Math.floor((start - minDate) / 86400000);
+                                const duration = Math.max(1, Math.ceil((end - start) / 86400000) + 1);
 
                                 return (
-                                    <div key={task.id} className="flex border-b border-gray-100 dark:border-slate-700 gantt-row">
-                                        <div className="sticky left-0 w-48 bg-white dark:bg-slate-800 p-2 text-xs truncate font-medium border-r z-10 cursor-pointer" onClick={() => onEdit(task)}>
+                                    <div key={task.id} className="flex border-b border-gray-50 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/50 h-12">
+                                        <div className="sticky left-0 w-52 bg-white dark:bg-slate-800 border-r p-2 text-xs truncate z-10 cursor-pointer flex items-center" onClick={() => onEdit(task)}>
                                             {task.titulo}
                                         </div>
-                                        <div className="relative h-10 w-full py-2">
+                                        <div className="relative flex-1 py-2">
                                             <div 
-                                                className="absolute h-6 rounded shadow-sm bg-blue-100 dark:bg-blue-900/30 overflow-hidden group cursor-pointer"
+                                                className="absolute h-8 rounded bg-blue-100 dark:bg-blue-900/30 overflow-hidden shadow-sm border border-white/20 cursor-pointer"
                                                 style={{ left: offset * dayWidth, width: duration * dayWidth }}
                                                 onClick={() => onEdit(task)}
                                             >
-                                                {/* BARRA DE PROGRESO REAL (LLENADO) */}
+                                                {/* BARRA DE LLENADO DE PROGRESO */}
                                                 <div 
-                                                    className="h-full bg-brand-500 transition-all duration-700"
+                                                    className="h-full bg-brand-500 transition-all duration-500"
                                                     style={{ width: `${task.progreso}%` }}
                                                 ></div>
-                                                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-blue-800 dark:text-blue-100">
+                                                <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-blue-900 dark:text-white drop-shadow-sm">
                                                     {task.progreso}%
-                                                </span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -132,117 +136,182 @@
             );
         };
 
+        // --- Modales ---
+        const TaskModal = ({ isOpen, onClose, onSave, taskToEdit }) => {
+            const [data, setData] = useState({ titulo: '', responsable: '', fechaInicio: '', fechaFin: '', progreso: 0, estado: 'Pendiente', subprocesos: [] });
+            
+            useEffect(() => {
+                if (isOpen) {
+                    if (taskToEdit) setData(taskToEdit);
+                    else setData({ id: Date.now(), titulo: '', responsable: '', fechaInicio: new Date().toISOString().split('T')[0], fechaFin: new Date().toISOString().split('T')[0], progreso: 0, estado: 'Pendiente', subprocesos: [] });
+                }
+            }, [isOpen, taskToEdit]);
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl w-full max-w-lg p-6 shadow-2xl">
+                        <h2 className="text-xl font-bold mb-4">{taskToEdit ? 'Editar Tarea' : 'Nueva Tarea'}</h2>
+                        <div className="space-y-4">
+                            <input type="text" placeholder="Título" value={data.titulo} onChange={e => setData({...data, titulo: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700" />
+                            <div className="grid grid-cols-2 gap-4">
+                                <input type="date" value={data.fechaInicio} onChange={e => setData({...data, fechaInicio: e.target.value})} className="p-2 border rounded dark:bg-slate-700" />
+                                <input type="date" value={data.fechaFin} onChange={e => setData({...data, fechaFin: e.target.value})} className="p-2 border rounded dark:bg-slate-700" />
+                            </div>
+                            <div>
+                                <label className="text-sm block mb-1">Progreso: {data.progreso}%</label>
+                                <input type="range" min="0" max="100" value={data.progreso} onChange={e => setData({...data, progreso: parseInt(e.target.value)})} className="w-full" />
+                            </div>
+                            <select value={data.estado} onChange={e => setData({...data, estado: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700">
+                                <option>Pendiente</option>
+                                <option>En Progreso</option>
+                                <option>Completado</option>
+                            </select>
+                        </div>
+                        <div className="flex justify-end gap-2 mt-6">
+                            <button onClick={onClose} className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded">Cancelar</button>
+                            <button onClick={() => { onSave(data); onClose(); }} className="px-4 py-2 bg-brand-600 text-white rounded">Guardar</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- App Principal ---
         const App = () => {
             const [tasks, setTasks] = useState([]);
             const [viewMode, setViewMode] = useState('list');
-            const [isOfficeReady, setIsOfficeReady] = useState(false);
-            const dialogRef = useRef(null);
+            const [modalOpen, setModalOpen] = useState(false);
+            const [editingTask, setEditingTask] = useState(null);
+            const [darkMode, setDarkMode] = useState(false);
+            const [officeReady, setOfficeReady] = useState(false);
 
             useEffect(() => {
-                Office.onReady((info) => {
+                Office.onReady(info => {
                     if (info.host === Office.HostType.Excel) {
-                        setIsOfficeReady(true);
-                        syncFromExcel();
+                        setOfficeReady(true);
+                        loadTasks();
                     }
                 });
 
-                // Escuchar mensajes del diálogo (ventana emergente)
-                if (window.Office && Office.context && Office.context.ui) {
-                    // Solo el panel lateral escucha esto
+                // Si estamos en la ventana emergente, avisar al padre para refrescar si hay cambios
+                if (window.location.search.includes('isDialog=true')) {
+                    // Lógica especial para cuando se abre como diálogo
                 }
             }, []);
 
-            const syncFromExcel = async () => {
+            const loadTasks = async () => {
                 try {
                     await Excel.run(async (context) => {
                         const sheet = context.workbook.worksheets.getItem("Cronograma");
                         const range = sheet.getUsedRange();
                         range.load("values");
                         await context.sync();
-                        
                         const [header, ...rows] = range.values;
-                        const formatted = rows.map((r, i) => ({
-                            id: r[0] || i,
-                            titulo: r[1],
-                            responsable: r[2],
-                            fechaInicio: r[3],
-                            fechaFin: r[4],
-                            progreso: parseInt(r[5] || 0),
-                            estado: r[6]
-                        }));
-                        setTasks(formatted);
+                        setTasks(rows.map((r, i) => ({
+                            id: r[0] || i, titulo: r[1], responsable: r[2], 
+                            fechaInicio: r[3], fechaFin: r[4], progreso: parseInt(r[5] || 0), 
+                            estado: r[6], subprocesos: []
+                        })));
                     });
-                } catch (e) {
-                    console.log("No se pudo leer Excel, usando locales.");
+                } catch(e) { console.log("Excel no disponible, modo offline."); }
+            };
+
+            const saveTasksToExcel = async (newTasks) => {
+                if (!officeReady) return;
+                try {
+                    await Excel.run(async (context) => {
+                        const sheet = context.workbook.worksheets.getItem("Cronograma");
+                        sheet.getRange("A2:G100").clear();
+                        const values = newTasks.map(t => [t.id, t.titulo, t.responsable, t.fechaInicio, t.fechaFin, t.progreso, t.estado]);
+                        const range = sheet.getRangeByIndexes(1, 0, values.length, 7);
+                        range.values = values;
+                        await context.sync();
+                    });
+                } catch(e) { console.error("Error al guardar en Excel."); }
+            };
+
+            const handleSaveTask = (task) => {
+                const newTasks = tasks.some(t => t.id === task.id) 
+                    ? tasks.map(t => t.id === task.id ? task : t)
+                    : [...tasks, task];
+                setTasks(newTasks);
+                saveTasksToExcel(newTasks);
+                
+                // Si esto es un diálogo, enviar mensaje al panel lateral
+                if (Office.context.ui && Office.context.ui.messageParent) {
+                    Office.context.ui.messageParent(JSON.stringify({ type: 'REFRESH' }));
                 }
             };
 
-            // FUNCIÓN CLAVE: Abrir ventana usando Dialog API
             const openPopup = () => {
-                const url = window.location.href; // Reutilizamos la misma página
-                Office.context.ui.displayDialogAsync(url, { height: 80, width: 80 }, (asyncResult) => {
-                    if (asyncResult.status === Office.AsyncResultStatus.Failed) {
-                        console.error("No se pudo abrir el diálogo");
-                    } else {
-                        dialogRef.current = asyncResult.value;
-                        // Escuchar lo que envíe la ventana emergente
-                        dialogRef.current.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
-                            const data = JSON.parse(arg.message);
-                            if (data.type === 'SYNC') syncFromExcel();
-                            dialogRef.current.close();
+                const url = window.location.href + (window.location.href.includes('?') ? '&' : '?') + 'isDialog=true';
+                Office.context.ui.displayDialogAsync(url, { height: 90, width: 90 }, (result) => {
+                    if (result.status === Office.AsyncResultStatus.Succeeded) {
+                        const dialog = result.value;
+                        dialog.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
+                            const msg = JSON.parse(arg.message);
+                            if (msg.type === 'REFRESH') loadTasks();
+                            dialog.close();
                         });
                     }
                 });
             };
 
-            // Si detectamos que estamos dentro de un diálogo, podemos enviar mensajes al padre
-            const notifyParent = () => {
-                if (Office.context.ui && Office.context.ui.messageParent) {
-                    Office.context.ui.messageParent(JSON.stringify({ type: 'SYNC' }));
-                }
-            };
-
             return (
-                <div className="p-4 max-w-6xl mx-auto">
-                    <header className="flex justify-between items-center mb-6">
-                        <div>
-                            <h1 className="text-2xl font-bold text-brand-700 dark:text-white">Cronograma de Trabajo | SPRC</h1>
-                            <p className="text-sm text-gray-500">{isOfficeReady ? 'Conectado a Excel' : 'Cargando...'}</p>
-                        </div>
-                        <div className="flex gap-2">
-                            <button onClick={openPopup} className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
-                                <Icons.ExternalLink size={18} /> Pop-up Seguro
-                            </button>
-                            <button onClick={() => setViewMode(viewMode === 'list' ? 'gantt' : 'list')} className="p-2 bg-gray-200 dark:bg-slate-700 rounded-lg">
-                                {viewMode === 'list' ? <Icons.BarChart3 /> : <Icons.LayoutGrid />}
-                            </button>
-                        </div>
-                    </header>
+                <div className={darkMode ? 'dark' : ''}>
+                    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 dark:text-white p-4">
+                        <header className="flex justify-between items-center mb-6">
+                            <div>
+                                <h1 className="text-xl font-bold flex items-center gap-2">
+                                    <Icons.CheckSquare className="text-brand-600" /> Cronograma SPRC
+                                </h1>
+                                <p className="text-xs text-gray-400">Panel de Control de Actividades</p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-gray-200 dark:border-slate-700">
+                                    {darkMode ? <Icons.Sun /> : <Icons.Moon />}
+                                </button>
+                                <button onClick={openPopup} className="p-2 rounded-lg bg-white dark:bg-slate-800 shadow-sm border border-gray-200 dark:border-slate-700 text-purple-600">
+                                    <Icons.ExternalLink />
+                                </button>
+                                <button onClick={() => setModalOpen(true)} className="bg-brand-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg shadow-brand-500/30">
+                                    <Icons.Plus /> Nueva
+                                </button>
+                            </div>
+                        </header>
 
-                    {viewMode === 'gantt' ? (
-                        <GanttView tasks={tasks} onEdit={(t) => console.log(t)} />
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {tasks.map(t => (
-                                <div key={t.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
-                                    <h3 className="font-bold">{t.titulo}</h3>
-                                    <div className="w-full bg-gray-200 h-2 rounded-full mt-2 overflow-hidden">
-                                        <div className="bg-brand-500 h-full" style={{width: `${t.progreso}%`}}></div>
+                        <div className="flex justify-between items-center mb-4">
+                            <div className="flex bg-white dark:bg-slate-800 p-1 rounded-lg border border-gray-200 dark:border-slate-700">
+                                <button onClick={() => setViewMode('list')} className={`p-2 rounded ${viewMode === 'list' ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700' : ''}`}><Icons.LayoutGrid /></button>
+                                <button onClick={() => setViewMode('gantt')} className={`p-2 rounded ${viewMode === 'gantt' ? 'bg-brand-100 dark:bg-brand-900/30 text-brand-700' : ''}`}><Icons.BarChart3 /></button>
+                            </div>
+                        </div>
+
+                        {viewMode === 'list' ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {tasks.map(t => (
+                                    <div key={t.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <h3 className="font-bold truncate pr-4">{t.titulo}</h3>
+                                            <button onClick={() => { setEditingTask(t); setModalOpen(true); }} className="text-blue-500"><Icons.Edit2 size={16} /></button>
+                                        </div>
+                                        <div className="w-full bg-gray-100 dark:bg-slate-700 h-2 rounded-full overflow-hidden mb-2">
+                                            <div className="bg-brand-500 h-full" style={{width: `${t.progreso}%`}}></div>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] text-gray-500">
+                                            <span>{t.fechaInicio}</span>
+                                            <span className="font-bold">{t.progreso}%</span>
+                                        </div>
                                     </div>
-                                    <p className="text-xs mt-1 text-gray-500">{t.progreso}% completado</p>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* Botón de prueba para cuando se abre como diálogo */}
-                    {window.location.search.includes('_host_Info') && (
-                         <div className="mt-10 p-4 bg-yellow-100 rounded text-center">
-                            <p className="mb-2 font-bold">Modo Ventana Emergente</p>
-                            <button onClick={notifyParent} className="bg-brand-600 text-white px-4 py-2 rounded">Cerrar y Sincronizar</button>
-                         </div>
-                    )}
+                                ))}
+                            </div>
+                        ) : (
+                            <GanttView tasks={tasks} onEdit={(t) => { setEditingTask(t); setModalOpen(true); }} />
+                        )}
+                    </div>
+                    <TaskModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSave={handleSaveTask} taskToEdit={editingTask} />
                 </div>
             );
         };
