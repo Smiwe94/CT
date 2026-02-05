@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cronograma de Trabajo | SPRC</title>
+    
+    <!-- Scripts base -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { 50: '#f0f9ff', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1' }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+        .gantt-row:hover { background-color: rgba(243, 244, 246, 0.5); }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 dark:bg-slate-900 dark:text-gray-100 transition-colors duration-300">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- Componente Icono ---
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (ref.current) {
+                    ref.current.innerHTML = '';
+                    const i = document.createElement('i');
+                    i.setAttribute('data-lucide', name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase());
+                    ref.current.appendChild(i);
+                    lucide.createIcons({ root: ref.current, attrs: { width: size, height: size, class: className } });
+                }
+            }, [name, size, className]);
+            return <span ref={ref} className="inline-flex" />;
+        };
+
+        const Icons = {
+            Plus: (p) => <Icon name="Plus" {...p} />,
+            Trash2: (p) => <Icon name="Trash2" {...p} />,
+            Edit2: (p) => <Icon name="Edit2" {...p} />,
+            Save: (p) => <Icon name="Save" {...p} />,
+            X: (p) => <Icon name="X" {...p} />,
+            ExternalLink: (p) => <Icon name="ExternalLink" {...p} />,
+            BarChart3: (p) => <Icon name="BarChart3" {...p} />,
+            LayoutGrid: (p) => <Icon name="LayoutGrid" {...p} />,
+        };
+
+        // --- Vista Gantt con Progreso Visual ---
+        const GanttView = ({ tasks, onEdit }) => {
+            const { dates, minDate } = useMemo(() => {
+                const now = new Date();
+                if (tasks.length === 0) return { dates: Array.from({length: 14}, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; }), minDate: now };
+                const allDates = tasks.flatMap(t => [new Date(t.fechaInicio), new Date(t.fechaFin)]);
+                const min = new Date(Math.min(...allDates));
+                min.setDate(min.getDate() - 2);
+                const max = new Date(Math.max(...allDates));
+                max.setDate(max.getDate() + 5);
+                const arr = [];
+                for(let d = new Date(min); d <= max; d.setDate(d.getDate() + 1)) arr.push(new Date(d));
+                return { dates: arr, minDate: min };
+            }, [tasks]);
+
+            const dayWidth = 40;
+
+            return (
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-gray-200 dark:border-slate-700 overflow-hidden flex flex-col h-[500px]">
+                    <div className="overflow-auto custom-scrollbar relative flex-1">
+                        <div style={{ width: `${dates.length * dayWidth + 200}px` }}>
+                            {/* Header fechas */}
+                            <div className="flex sticky top-0 z-20 bg-gray-50 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700">
+                                <div className="sticky left-0 w-48 bg-gray-50 dark:bg-slate-800 p-2 font-bold text-xs border-r z-30">Tarea</div>
+                                {dates.map((d, i) => (
+                                    <div key={i} className="text-[10px] text-center border-r border-gray-200 dark:border-slate-700 py-1 flex-shrink-0" style={{ width: dayWidth }}>
+                                        {d.getDate()}<br/>{d.toLocaleDateString('es', {month: 'short'})}
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Filas */}
+                            {tasks.map(task => {
+                                const start = new Date(task.fechaInicio);
+                                const end = new Date(task.fechaFin);
+                                const offset = Math.max(0, Math.floor((start - minDate) / (86400000)));
+                                const duration = Math.max(1, Math.ceil((end - start) / (86400000)) + 1);
+
+                                return (
+                                    <div key={task.id} className="flex border-b border-gray-100 dark:border-slate-700 gantt-row">
+                                        <div className="sticky left-0 w-48 bg-white dark:bg-slate-800 p-2 text-xs truncate font-medium border-r z-10 cursor-pointer" onClick={() => onEdit(task)}>
+                                            {task.titulo}
+                                        </div>
+                                        <div className="relative h-10 w-full py-2">
+                                            <div 
+                                                className="absolute h-6 rounded shadow-sm bg-blue-100 dark:bg-blue-900/30 overflow-hidden group cursor-pointer"
+                                                style={{ left: offset * dayWidth, width: duration * dayWidth }}
+                                                onClick={() => onEdit(task)}
+                                            >
+                                                {/* BARRA DE PROGRESO REAL (LLENADO) */}
+                                                <div 
+                                                    className="h-full bg-brand-500 transition-all duration-700"
+                                                    style={{ width: `${task.progreso}%` }}
+                                                ></div>
+                                                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-blue-800 dark:text-blue-100">
+                                                    {task.progreso}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- App Principal ---
+        const App = () => {
+            const [tasks, setTasks] = useState([]);
+            const [viewMode, setViewMode] = useState('list');
+            const [isOfficeReady, setIsOfficeReady] = useState(false);
+            const dialogRef = useRef(null);
+
+            useEffect(() => {
+                Office.onReady((info) => {
+                    if (info.host === Office.HostType.Excel) {
+                        setIsOfficeReady(true);
+                        syncFromExcel();
+                    }
+                });
+
+                // Escuchar mensajes del diálogo (ventana emergente)
+                if (window.Office && Office.context && Office.context.ui) {
+                    // Solo el panel lateral escucha esto
+                }
+            }, []);
+
+            const syncFromExcel = async () => {
+                try {
+                    await Excel.run(async (context) => {
+                        const sheet = context.workbook.worksheets.getItem("Cronograma");
+                        const range = sheet.getUsedRange();
+                        range.load("values");
+                        await context.sync();
+                        
+                        const [header, ...rows] = range.values;
+                        const formatted = rows.map((r, i) => ({
+                            id: r[0] || i,
+                            titulo: r[1],
+                            responsable: r[2],
+                            fechaInicio: r[3],
+                            fechaFin: r[4],
+                            progreso: parseInt(r[5] || 0),
+                            estado: r[6]
+                        }));
+                        setTasks(formatted);
+                    });
+                } catch (e) {
+                    console.log("No se pudo leer Excel, usando locales.");
+                }
+            };
+
+            // FUNCIÓN CLAVE: Abrir ventana usando Dialog API
+            const openPopup = () => {
+                const url = window.location.href; // Reutilizamos la misma página
+                Office.context.ui.displayDialogAsync(url, { height: 80, width: 80 }, (asyncResult) => {
+                    if (asyncResult.status === Office.AsyncResultStatus.Failed) {
+                        console.error("No se pudo abrir el diálogo");
+                    } else {
+                        dialogRef.current = asyncResult.value;
+                        // Escuchar lo que envíe la ventana emergente
+                        dialogRef.current.addEventHandler(Office.EventType.DialogMessageReceived, (arg) => {
+                            const data = JSON.parse(arg.message);
+                            if (data.type === 'SYNC') syncFromExcel();
+                            dialogRef.current.close();
+                        });
+                    }
+                });
+            };
+
+            // Si detectamos que estamos dentro de un diálogo, podemos enviar mensajes al padre
+            const notifyParent = () => {
+                if (Office.context.ui && Office.context.ui.messageParent) {
+                    Office.context.ui.messageParent(JSON.stringify({ type: 'SYNC' }));
+                }
+            };
+
+            return (
+                <div className="p-4 max-w-6xl mx-auto">
+                    <header className="flex justify-between items-center mb-6">
+                        <div>
+                            <h1 className="text-2xl font-bold text-brand-700 dark:text-white">Cronograma de Trabajo | SPRC</h1>
+                            <p className="text-sm text-gray-500">{isOfficeReady ? 'Conectado a Excel' : 'Cargando...'}</p>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={openPopup} className="flex items-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
+                                <Icons.ExternalLink size={18} /> Pop-up Seguro
+                            </button>
+                            <button onClick={() => setViewMode(viewMode === 'list' ? 'gantt' : 'list')} className="p-2 bg-gray-200 dark:bg-slate-700 rounded-lg">
+                                {viewMode === 'list' ? <Icons.BarChart3 /> : <Icons.LayoutGrid />}
+                            </button>
+                        </div>
+                    </header>
+
+                    {viewMode === 'gantt' ? (
+                        <GanttView tasks={tasks} onEdit={(t) => console.log(t)} />
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {tasks.map(t => (
+                                <div key={t.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
+                                    <h3 className="font-bold">{t.titulo}</h3>
+                                    <div className="w-full bg-gray-200 h-2 rounded-full mt-2 overflow-hidden">
+                                        <div className="bg-brand-500 h-full" style={{width: `${t.progreso}%`}}></div>
+                                    </div>
+                                    <p className="text-xs mt-1 text-gray-500">{t.progreso}% completado</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Botón de prueba para cuando se abre como diálogo */}
+                    {window.location.search.includes('_host_Info') && (
+                         <div className="mt-10 p-4 bg-yellow-100 rounded text-center">
+                            <p className="mb-2 font-bold">Modo Ventana Emergente</p>
+                            <button onClick={notifyParent} className="bg-brand-600 text-white px-4 py-2 rounded">Cerrar y Sincronizar</button>
+                         </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
