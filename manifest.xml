@@ -12,8 +12,8 @@
     <Host Name="Workbook" />
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://localhost:3000/Actividades.html" />
+    <SourceLocation DefaultValue="https://smiwe94.github.io/CT/index.html" />
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
-  <SupportUrl DefaultValue="https://localhost:3000" />
+  <SupportUrl DefaultValue="https://smiwe94.github.io/CT" />
 </OfficeApp>
