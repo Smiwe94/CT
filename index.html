@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cronograma de Trabajo | SPRC</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel para JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- SheetJS para manejar Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Office.js para Excel en OneDrive -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Configuración de Tailwind -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #475569; }
+        
+        /* Animaciones suaves */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        .animate-fade-in-up { animation: slideUp 0.3s ease-out; }
+        
+        /* Toast Animation */
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast-enter { animation: slideInRight 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 dark:bg-slate-900 dark:text-gray-100 transition-colors duration-300">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+        // --- CANALES DE COMUNICACIÓN (BROADCAST CHANNEL) ---
+        const CHANNEL_NAME = 'cronos_sync_channel';
+        
+        // Tipos de mensajes
+        const MSG_SYNC_STATE = 'SYNC_STATE'; // Panel -> Ventana
+        const MSG_REQUEST_INIT = 'REQUEST_INIT'; // Ventana -> Panel
+        const MSG_ACTION_UPDATE = 'ACTION_UPDATE'; // Ventana -> Panel (Crear/Editar)
+        const MSG_ACTION_DELETE = 'ACTION_DELETE'; // Ventana -> Panel (Borrar)
+
+        // --- Utilidad para Parsear Fechas en Local ---
+        const parseLocalDate = (dateStr) => {
+            if (!dateStr) return new Date();
+            const [year, month, day] = dateStr.split('-').map(Number);
+            return new Date(year, month - 1, day);
+        };
+
+        // --- Componente Icono Seguro ---
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (ref.current) {
+                    ref.current.innerHTML = '';
+                    const i = document.createElement('i');
+                    const kebabName = name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+                    i.setAttribute('data-lucide', kebabName);
+                    ref.current.appendChild(i);
+                    lucide.createIcons({
+                        root: ref.current,
+                        attrs: { width: size, height: size, class: `lucide lucide-${kebabName} ${className}` }
+                    });
+                }
+            }, [name, size, className]);
+            return <span ref={ref} className="inline-flex items-center justify-center shrink-0" />;
+        };
+
+        // --- Diccionario de Iconos ---
+        const Icons = {
+            Plus: (p) => <Icon name="Plus" {...p} />,
+            Trash2: (p) => <Icon name="Trash2" {...p} />,
+            Edit2: (p) => <Icon name="Edit2" {...p} />,
+            Calendar: (p) => <Icon name="Calendar" {...p} />,
+            CheckSquare: (p) => <Icon name="CheckSquare" {...p} />,
+            Save: (p) => <Icon name="Save" {...p} />,
+            X: (p) => <Icon name="X" {...p} />,
+            Download: (p) => <Icon name="Download" {...p} />,
+            Upload: (p) => <Icon name="Upload" {...p} />,
+            Moon: (p) => <Icon name="Moon" {...p} />,
+            Sun: (p) => <Icon name="Sun" {...p} />,
+            ExternalLink: (p) => <Icon name="ExternalLink" {...p} />,
+            AlertTriangle: (p) => <Icon name="AlertTriangle" {...p} />,
+            Monitor: (p) => <Icon name="Monitor" {...p} />,
+            LayoutGrid: (p) => <Icon name="LayoutGrid" {...p} />,
+            BarChart3: (p) => <Icon name="BarChart3" {...p} />,
+            ChevronDown: (p) => <Icon name="ChevronDown" {...p} />,
+            ChevronUp: (p) => <Icon name="ChevronUp" {...p} />,
+        };
+
+        // --- Componente: Toast (Notificaciones) ---
+        const ToastContainer = ({ toasts }) => {
+            return (
+                <div className="fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
+                    {toasts.map(t => (
+                        <div key={t.id} className="bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 toast-enter border-l-4 border-brand-500">
+                            <span>{t.message}</span>
+                        </div>
+                    ))}
+                </div>
+            );
+        };
+
+        // --- Componente: Modal de Confirmación (Reemplaza window.confirm) ---
+        const ConfirmModal = ({ isOpen, title, message, onConfirm, onCancel }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70] p-4 animate-fade-in">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm p-6 transform transition-all scale-100 border border-gray-100 dark:border-slate-700">
+                        <div className="flex items-center gap-3 mb-4 text-amber-500">
+                            <Icons.AlertTriangle size={32} />
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-white">{title}</h3>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-300 mb-6">{message}</p>
+                        <div className="flex justify-end gap-3">
+                            <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-slate-700 rounded transition font-medium">Cancelar</button>
+                            <button onClick={onConfirm} className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition shadow-lg shadow-red-500/30 font-medium">Eliminar</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Componente: Vista Gantt ---
+        const GanttView = ({ tasks, onEdit }) => {
+            if (tasks.length === 0) return (
+                <div className="text-center py-20 opacity-50 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-gray-100 dark:border-slate-700">
+                    <p>No hay tareas para mostrar en el cronograma.</p>
+                </div>
+            );
+
+            const { dates, minDate, maxDate } = useMemo(() => {
+                if (tasks.length === 0) return { dates: [], minDate: new Date(), maxDate: new Date() };
+                
+                const allDates = tasks.flatMap(t => [parseLocalDate(t.fechaInicio), parseLocalDate(t.fechaFin)]);
+                const validDates = allDates.filter(d => !isNaN(d.getTime()));
+                
+                if (validDates.length === 0) {
+                     const now = new Date();
+                     return { dates: [], minDate: now, maxDate: now };
+                }
+
+                const min = new Date(Math.min(...validDates));
+                const max = new Date(Math.max(...validDates));
+                
+                min.setDate(min.getDate() - 3);
+                max.setDate(max.getDate() + 7);
+
+                const days = Math.ceil((max - min) / (1000 * 60 * 60 * 24));
+                const dateArray = [];
+                for (let i = 0; i <= days; i++) {
+                    const d = new Date(min);
+                    d.setDate(d.getDate() + i);
+                    dateArray.push(d);
+                }
+                return { dates: dateArray, minDate: min, maxDate: max };
+            }, [tasks]);
+
+            const dayWidth = 40;
+
+            return (
+                <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden flex flex-col h-[600px] animate-fade-in-up">
+                    <div className="p-4 border-b border-gray-100 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50 flex justify-between items-center">
+                        <h3 className="font-bold text-gray-700 dark:text-gray-200">Diagrama de Gantt</h3>
+                        <div className="text-xs text-gray-500">
+                            {dates.length > 0 && `${dates[0].toLocaleDateString()} - ${dates[dates.length-1].toLocaleDateString()}`}
+                        </div>
+                    </div>
+                    
+                    <div className="flex-1 overflow-auto custom-scrollbar relative">
+                        <div style={{ width: `${Math.max(dates.length * dayWidth + 200, 100)}px`, minWidth: '100%' }} className="relative">
+                            <div className="flex sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 h-10 shadow-sm">
+                                <div className="sticky left-0 w-52 bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 z-30 flex items-center px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider shadow-[2px_0_5px_rgba(0,0,0,0.05)]">Tarea</div>
+                                <div className="flex">
+                                    {dates.map((d, i) => (
+                                        <div key={i} className="border-r border-gray-100 dark:border-slate-700/50 flex-shrink-0 flex items-center justify-center text-[10px] text-gray-500 font-medium bg-gray-50/50 dark:bg-slate-800" style={{ width: `${dayWidth}px` }}>
+                                            <div className="text-center leading-tight">
+                                                <div>{d.getDate()}</div>
+                                                <div className="opacity-50">{d.toLocaleDateString('es-ES', { month: 'short' })}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="relative">
+                                <div className="absolute inset-0 flex pl-52 pointer-events-none z-0">
+                                    {dates.map((_, i) => (
+                                        <div key={i} className="border-r border-dashed border-gray-100 dark:border-slate-700/30 h-full flex-shrink-0" style={{ width: `${dayWidth}px` }}></div>
+                                    ))}
+                                </div>
+
+                                {tasks.map((task) => {
+                                    const start = parseLocalDate(task.fechaInicio);
+                                    const end = parseLocalDate(task.fechaFin);
+                                    if(isNaN(start) || isNaN(end)) return null;
+
+                                    const durationDays = Math.max(Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1, 1);
+                                    const offsetDays = Math.ceil((start - minDate) / (1000 * 60 * 60 * 24));
+                                    
+                                    const leftPos = offsetDays * dayWidth;
+                                    const widthPx = durationDays * dayWidth;
+
+                                    let barColor = 'bg-brand-500';
+                                    if (task.estado === 'Completado') barColor = 'bg-green-500';
+                                    else if (task.estado === 'Pausado') barColor = 'bg-gray-400';
+                                    else if (task.estado === 'Pendiente') barColor = 'bg-orange-400';
+
+                                    return (
+                                        <div key={task.id} className="flex h-12 border-b border-gray-100 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700/30 transition group relative z-10">
+                                            <div className="sticky left-0 w-52 bg-white dark:bg-slate-800 border-r border-gray-200 dark:border-slate-700 z-20 flex flex-col justify-center px-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-700 shadow-[2px_0_5px_rgba(0,0,0,0.05)]" onClick={() => onEdit(task)}>
+                                                <div className="font-medium text-sm truncate text-gray-700 dark:text-gray-200" title={task.titulo}>{task.titulo}</div>
+                                                <div className="text-[10px] text-gray-400 truncate">{task.responsable || 'Sin asignar'}</div>
+                                            </div>
+
+                                            <div className="flex-1 relative">
+                                                <div className={`absolute top-2 h-8 rounded-md shadow-sm border border-white/20 text-xs text-white flex items-center justify-center overflow-hidden whitespace-nowrap px-2 cursor-pointer transition-all hover:shadow-md hover:brightness-110 ${barColor}`} style={{ left: `${leftPos}px`, width: `${widthPx}px` }} onClick={() => onEdit(task)} title={`${task.titulo}: ${task.progreso}%`}>
+                                                    {widthPx > 40 && <span className="drop-shadow-md font-semibold">{task.progreso}%</span>}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Componente: Modal de Tarea ---
+        const TaskModal = ({ isOpen, onClose, onSave, taskToEdit }) => {
+            const [formData, setFormData] = useState({ id: null, titulo: '', responsable: '', fechaInicio: '', fechaFin: '', progreso: 0, estado: 'Pendiente', prioridad: 'Media', descripcion: '', subprocesos: [] });
+            const [newSubprocess, setNewSubprocess] = useState('');
+
+            useEffect(() => {
+                if (isOpen) {
+                    if (taskToEdit) {
+                        setFormData({ ...taskToEdit, subprocesos: Array.isArray(taskToEdit.subprocesos) ? taskToEdit.subprocesos.map(s => typeof s === 'string' ? { text: s, done: false } : s) : [] });
+                    } else {
+                        const today = new Date().toISOString().split('T')[0];
+                        setFormData({ id: Date.now(), titulo: '', responsable: '', fechaInicio: today, fechaFin: today, progreso: 0, estado: 'Pendiente', prioridad: 'Media', descripcion: '', subprocesos: [] });
+                    }
+                }
+            }, [isOpen, taskToEdit]);
+
+            const handleChange = (e) => { const { name, value } = e.target; setFormData(prev => ({ ...prev, [name]: value })); };
+            const handleAddSubprocess = (e) => {
+                e.preventDefault();
+                if (!newSubprocess.trim()) return;
+                const updated = [...formData.subprocesos, { text: newSubprocess, done: false }];
+                setFormData(prev => ({ ...prev, subprocesos: updated, progreso: calculateProgress(updated) }));
+                setNewSubprocess('');
+            };
+            const handleDeleteSubprocess = (index) => {
+                const updated = formData.subprocesos.filter((_, i) => i !== index);
+                setFormData(prev => ({ ...prev, subprocesos: updated, progreso: calculateProgress(updated) }));
+            };
+            const calculateProgress = (subs) => {
+                if (!subs || subs.length === 0) return formData.progreso;
+                const completed = subs.filter(s => s.done).length;
+                return Math.round((completed / subs.length) * 100);
+            };
+            const handleSubmit = (e) => { e.preventDefault(); onSave(formData); onClose(); };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto transform transition-all custom-scrollbar">
+                        <div className="p-6 border-b border-gray-100 dark:border-slate-700 flex justify-between items-center sticky top-0 bg-white dark:bg-slate-800 z-10">
+                            <h2 className="text-xl font-bold text-gray-800 dark:text-white flex items-center gap-2">{taskToEdit ? <Icons.Edit2 /> : <Icons.Plus />} {taskToEdit ? 'Editar Tarea' : 'Nueva Tarea'}</h2>
+                            <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-full transition"><Icons.X /></button>
+                        </div>
+                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Título</label><input required type="text" name="titulo" value={formData.titulo} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent focus:ring-2 focus:ring-brand-500 outline-none transition" /></div>
+                                <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Responsable</label><input type="text" name="responsable" value={formData.responsable} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent focus:ring-2 focus:ring-brand-500 outline-none transition" /></div>
+                                <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Fecha Inicio</label><input required type="date" name="fechaInicio" value={formData.fechaInicio} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent" /></div>
+                                <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Fecha Fin</label><input required type="date" name="fechaFin" value={formData.fechaFin} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent" /></div>
+                                <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Estado</label><select name="estado" value={formData.estado} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent"><option value="Pendiente">Pendiente</option><option value="En Progreso">En Progreso</option><option value="Completado">Completado</option><option value="Pausado">Pausado</option></select></div>
+                                <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Prioridad</label><select name="prioridad" value={formData.prioridad} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent"><option value="Baja">Baja</option><option value="Media">Media</option><option value="Alta">Alta</option><option value="Urgente">Urgente</option></select></div>
+                            </div>
+                            <div className="bg-gray-50 dark:bg-slate-700/50 p-4 rounded-lg border border-gray-100 dark:border-slate-600">
+                                <label className="block text-sm font-bold mb-2 text-gray-700 dark:text-gray-200 flex justify-between"><span>Subprocesos / Checkpoints</span><span className="text-xs font-normal text-gray-500">(Automático)</span></label>
+                                <div className="space-y-2 mb-3">
+                                    {formData.subprocesos.map((sub, index) => (
+                                        <div key={index} className="flex items-center gap-2 group"><span className="text-gray-400 text-sm">#{index + 1}</span><div className="flex-1 p-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded text-sm">{sub.text}</div><button type="button" onClick={() => handleDeleteSubprocess(index)} className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition"><Icons.Trash2 /></button></div>
+                                    ))}
+                                    {formData.subprocesos.length === 0 && <p className="text-sm text-gray-400 italic text-center py-2">No hay subprocesos</p>}
+                                </div>
+                                <div className="flex gap-2"><input type="text" value={newSubprocess} onChange={(e) => setNewSubprocess(e.target.value)} placeholder="Nuevo checkpoint..." className="flex-1 p-2 border border-gray-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-sm" onKeyPress={(e) => e.key === 'Enter' && handleAddSubprocess(e)}/><button type="button" onClick={handleAddSubprocess} className="px-3 py-2 bg-gray-200 dark:bg-slate-600 hover:bg-gray-300 dark:hover:bg-slate-500 rounded text-sm font-medium transition">Añadir</button></div>
+                            </div>
+                            <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300 flex justify-between"><span>Progreso General (%)</span><span className="font-bold text-brand-600">{formData.progreso}%</span></label><input type="range" name="progreso" min="0" max="100" value={formData.progreso} onChange={handleChange} disabled={formData.subprocesos.length > 0} className={`w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 ${formData.subprocesos.length > 0 ? 'opacity-50 cursor-not-allowed' : ''}`}/></div>
+                            <div><label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Descripción</label><textarea name="descripcion" value={formData.descripcion} onChange={handleChange} rows="3" className="w-full p-2 border border-gray-300 dark:border-slate-600 rounded bg-transparent resize-none"></textarea></div>
+                            <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100 dark:border-slate-700 sticky bottom-0 bg-white dark:bg-slate-800">
+                                <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-slate-700 rounded transition">Cancelar</button>
+                                <button type="submit" className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700 transition flex items-center gap-2 shadow-lg shadow-brand-500/30"><Icons.Save /> Guardar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Componente: Tarjeta de Tarea ---
+        const TaskCard = ({ task, onEdit, onRequestDelete, onToggleSubprocess }) => {
+            const [expanded, setExpanded] = useState(false);
+            const priorityColors = { 'Baja': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300', 'Media': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300', 'Alta': 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300', 'Urgente': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' };
+            const daysLeft = Math.ceil((parseLocalDate(task.fechaFin) - new Date()) / (1000 * 60 * 60 * 24));
+            const daysColor = daysLeft < 0 ? 'text-red-500' : daysLeft < 3 ? 'text-orange-500' : 'text-gray-500 dark:text-gray-400';
+
+            return (
+                <div className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm border border-gray-100 dark:border-slate-700 hover:shadow-md transition-all group animate-fade-in-up">
+                    <div className="flex justify-between items-start mb-2">
+                        <div><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${priorityColors[task.prioridad]}`}>{task.prioridad}</span><h3 className="font-bold text-gray-800 dark:text-gray-100 mt-1 text-lg">{task.titulo}</h3></div>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => onEdit(task)} className="p-1.5 text-blue-500 hover:bg-blue-50 dark:hover:bg-slate-700 rounded"><Icons.Edit2 /></button><button onClick={() => onRequestDelete(task)} className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-slate-700 rounded"><Icons.Trash2 /></button></div>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-3">{task.descripcion || 'Sin descripción'}</p>
+                    <div className="mb-3"><div className="flex justify-between text-xs mb-1"><span className="text-gray-500 dark:text-gray-400">Progreso</span><span className="font-bold text-brand-600">{task.progreso}%</span></div><div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden"><div className={`h-2 rounded-full transition-all duration-500 ${task.progreso === 100 ? 'bg-green-500' : 'bg-brand-500'}`} style={{ width: `${task.progreso}%` }}></div></div></div>
+                    {task.subprocesos && task.subprocesos.length > 0 && (
+                        <div className="mb-3 bg-gray-50 dark:bg-slate-700/30 p-2 rounded border border-gray-100 dark:border-slate-700">
+                            <div className="flex justify-between items-center cursor-pointer mb-1 select-none" onClick={() => setExpanded(!expanded)}><span className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider flex items-center gap-2"><Icons.CheckSquare /> Checkpoints ({task.subprocesos.filter(s => s.done).length}/{task.subprocesos.length})</span>{expanded ? <Icons.ChevronUp /> : <Icons.ChevronDown />}</div>
+                            {expanded && (
+                                <div className="mt-2 space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar animate-fade-in">
+                                    {task.subprocesos.map((sub, idx) => (
+                                        <label key={idx} className="flex items-start gap-2 text-sm cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-700 p-1 rounded transition select-none"><input type="checkbox" checked={sub.done} onChange={() => onToggleSubprocess(task.id, idx)} className="mt-1 w-4 h-4 text-brand-600 rounded border-gray-300 focus:ring-brand-500 dark:border-gray-600 dark:bg-slate-700"/><span className={`${sub.done ? 'line-through text-gray-400' : 'text-gray-700 dark:text-gray-200'}`}>{sub.text}</span></label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-slate-700 text-xs text-gray-500 dark:text-gray-400"><div className="flex items-center gap-1"><Icons.Calendar /> {task.fechaFin}</div><span className={`font-medium ${daysColor}`}>{daysLeft < 0 ? `Vencido ${Math.abs(daysLeft)}d` : `${daysLeft}d restantes`}</span></div>
+                </div>
+            );
+        };
+
+        const EXCEL_HEADERS = ['id', 'titulo', 'responsable', 'fechaInicio', 'fechaFin', 'progreso', 'estado', 'prioridad', 'descripcion', 'subprocesos'];
+        const normalizeHeader = (header) => String(header || '').trim().toLowerCase();
+        const serializeSubprocesses = (subprocesses) => JSON.stringify(Array.isArray(subprocesses) ? subprocesses : []);
+        const parseSubprocessesCell = (value) => {
+            if (!value) return [];
+            if (Array.isArray(value)) return value;
+            if (typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) return parsed;
+                } catch (error) {
+                    return value.split(', ').map((s) => { const m = s.match(/^(.*) \((OK|X)\)$/); return m ? { text: m[1], done: m[2] === 'OK' } : { text: s, done: false }; });
+                }
+            }
+            return [];
+        };
+        const mapRowToTask = (row, headerMap) => ({
+            id: Number(row[headerMap['id'] || 0]) || Date.now() + Math.random(),
+            titulo: row[headerMap['titulo'] || 1] || 'Sin título',
+            responsable: row[headerMap['responsable'] || 2] || '',
+            fechaInicio: row[headerMap['fechainicio'] || 3] || new Date().toISOString().split('T')[0],
+            fechaFin: row[headerMap['fechafin'] || 4] || new Date().toISOString().split('T')[0],
+            progreso: Number(row[headerMap['progreso'] || 5]) || 0,
+            estado: row[headerMap['estado'] || 6] || 'Pendiente',
+            prioridad: row[headerMap['prioridad'] || 7] || 'Media',
+            descripcion: row[headerMap['descripcion'] || 8] || '',
+            subprocesos: parseSubprocessesCell(row[headerMap['subprocesos'] || 9])
+        });
+
+        // --- Componente Principal ---
+        const App = () => {
+            // Estado principal
+            const [tasks, setTasks] = useState(() => {
+                const saved = localStorage.getItem('cronograma_tasks');
+                return saved ? JSON.parse(saved) : [{ id: 1, titulo: 'Bienvenido', responsable: 'Sistema', fechaInicio: new Date().toISOString().split('T')[0], fechaFin: new Date().toISOString().split('T')[0], progreso: 100, estado: 'Completado', prioridad: 'Alta', descripcion: 'Configuración inicial lista', subprocesos: [] }];
+            });
+            const [modalOpen, setModalOpen] = useState(false);
+            const [editingTask, setEditingTask] = useState(null);
+            const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+            const [taskToDelete, setTaskToDelete] = useState(null);
+            
+            // Estado visual
+            const [darkMode, setDarkMode] = useState(false);
+            const [filter, setFilter] = useState('Todos');
+            const [viewMode, setViewMode] = useState('list');
+            const [toasts, setToasts] = useState([]);
+
+            // Estado de sincronización
+            const [officeReady, setOfficeReady] = useState(false);
+            const [syncStatus, setSyncStatus] = useState('');
+            const [lastSyncAt, setLastSyncAt] = useState(null);
+            const [autoSync, setAutoSync] = useState(true);
+            const [isSyncing, setIsSyncing] = useState(false);
+            
+            // Estado de Control Remoto (Popup)
+            const [isPopupMode, setIsPopupMode] = useState(false);
+            const channelRef = useRef(null);
+
+            const fileInputRef = useRef(null);
+
+            // 1. Inicialización
+            useEffect(() => {
+                // Detectar si estamos en modo popup por URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const popupMode = urlParams.get('mode') === 'popup';
+                setIsPopupMode(popupMode);
+
+                // Configurar BroadcastChannel
+                channelRef.current = new BroadcastChannel(CHANNEL_NAME);
+                channelRef.current.onmessage = (event) => {
+                    const { type, payload } = event.data;
+                    
+                    if (type === MSG_SYNC_STATE) {
+                        // El Panel envió el estado actualizado a la Ventana
+                        if (popupMode) {
+                            setTasks(payload.tasks);
+                            setLastSyncAt(payload.lastSyncAt ? new Date(payload.lastSyncAt) : null);
+                            setSyncStatus(payload.syncStatus);
+                        }
+                    } else if (type === MSG_REQUEST_INIT && !popupMode) {
+                        // La Ventana pide el estado inicial al Panel
+                        broadcastState();
+                    } else if (type === MSG_ACTION_UPDATE && !popupMode) {
+                        // La Ventana pide actualizar una tarea
+                        handleSaveTask(payload, true); // true = skipBroadcast loop
+                    } else if (type === MSG_ACTION_DELETE && !popupMode) {
+                        // La Ventana pide borrar
+                        performDelete(payload, true);
+                    }
+                };
+
+                // Si soy Popup, pedir datos al iniciar
+                if (popupMode) {
+                    channelRef.current.postMessage({ type: MSG_REQUEST_INIT });
+                }
+
+                // Detectar modo oscuro sistema
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) setDarkMode(true);
+
+                // Inicializar Office (solo si NO estamos en popup o si Office carga)
+                if (window.Office) {
+                    Office.onReady((info) => {
+                        if (info.host === Office.HostType.Excel) {
+                            setOfficeReady(true);
+                        }
+                    });
+                }
+
+                return () => channelRef.current.close();
+            }, []);
+
+            // 2. Efectos secundarios
+            useEffect(() => { if (darkMode) document.documentElement.classList.add('dark'); else document.documentElement.classList.remove('dark'); }, [darkMode]);
+            
+            // Cuando cambian las tareas, guardar local y broadcast si soy Panel
+            useEffect(() => {
+                localStorage.setItem('cronograma_tasks', JSON.stringify(tasks));
+                if (!isPopupMode) broadcastState();
+            }, [tasks]);
+
+            // Función para enviar estado a la ventana remota
+            const broadcastState = () => {
+                if (channelRef.current) {
+                    channelRef.current.postMessage({
+                        type: MSG_SYNC_STATE,
+                        payload: { tasks, lastSyncAt, syncStatus }
+                    });
+                }
+            };
+
+            const addToast = (msg) => {
+                const id = Date.now();
+                setToasts(prev => [...prev, { id, message: msg }]);
+                setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+            };
+
+            // --- Lógica de Negocio ---
+
+            const handleSaveTask = (taskData, fromRemote = false) => {
+                if (isPopupMode) {
+                    // Si soy popup, mando la orden al panel
+                    channelRef.current.postMessage({ type: MSG_ACTION_UPDATE, payload: taskData });
+                    // Actualizo optimísticamente para mejor UX
+                    updateLocalState(taskData);
+                } else {
+                    // Soy Panel
+                    updateLocalState(taskData);
+                    addToast(taskData.id === editingTask?.id ? "Tarea actualizada" : "Tarea creada");
+                }
+            };
+
+            const updateLocalState = (taskData) => {
+                let newTasks;
+                if (tasks.some(t => t.id === taskData.id)) {
+                    newTasks = tasks.map(t => t.id === taskData.id ? taskData : t);
+                } else {
+                    newTasks = [...tasks, taskData];
+                }
+                setTasks(newTasks);
+                // Trigger auto-sync solo si soy panel (el efecto useEffect[tasks] manejará el saveToExcelAddin)
+            };
+
+            // Iniciar flujo de borrado (abre modal)
+            const initiateDelete = (task) => {
+                setTaskToDelete(task);
+                setDeleteModalOpen(true);
+            };
+
+            // Ejecutar borrado confirmado
+            const confirmDelete = () => {
+                if (!taskToDelete) return;
+                
+                if (isPopupMode) {
+                    channelRef.current.postMessage({ type: MSG_ACTION_DELETE, payload: taskToDelete.id });
+                    performDelete(taskToDelete.id);
+                } else {
+                    performDelete(taskToDelete.id);
+                    addToast("Tarea eliminada correctamente");
+                }
+                setDeleteModalOpen(false);
+                setTaskToDelete(null);
+            };
+
+            const performDelete = (id, fromRemote = false) => {
+                setTasks(prev => prev.filter(t => t.id !== id));
+            };
+
+            const openModal = (task = null) => { setEditingTask(task); setModalOpen(true); };
+            
+            // Función crítica: Abrir ventana "Popup" conectada
+            const openConnectedPopup = () => {
+                // Abrimos la misma URL pero con ?mode=popup
+                const url = window.location.href.split('?')[0] + '?mode=popup';
+                window.open(url, 'CronosRemote', 'width=1000,height=800,menubar=no,toolbar=no,location=no,status=no');
+            };
+
+            const handleToggleSubprocess = (taskId, subprocessIndex) => {
+                const task = tasks.find(t => t.id === taskId);
+                if (!task) return;
+                
+                const newSubprocesses = task.subprocesos.map((sub, idx) => idx === subprocessIndex ? { ...sub, done: !sub.done } : sub);
+                const completed = newSubprocesses.filter(s => s.done).length;
+                const newProgress = newSubprocesses.length === 0 ? task.progreso : Math.round((completed / newSubprocesses.length) * 100);
+                
+                let newStatus = task.estado;
+                if (newProgress === 100) newStatus = 'Completado'; 
+                else if (newProgress > 0 && newStatus === 'Pendiente') newStatus = 'En Progreso'; 
+                else if (newProgress === 0) newStatus = 'Pendiente';
+                
+                const updatedTask = { ...task, subprocesos: newSubprocesses, progreso: newProgress, estado: newStatus };
+                handleSaveTask(updatedTask);
+            };
+
+            const exportToExcel = () => {
+                const ws = XLSX.utils.json_to_sheet(tasks.map(t => ({ ...t, subprocesos: t.subprocesos.map(s => `${s.text} (${s.done ? 'OK' : 'X'})`).join(', ') })));
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Cronograma");
+                XLSX.writeFile(wb, "Reporte_Cronograma.xlsx");
+            };
+
+            const importFromExcelFile = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const workbook = XLSX.read(evt.target.result, { type: 'array' });
+                        const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                        const parsedTasks = jsonData.map(row => ({
+                            id: Date.now() + Math.random(), titulo: row.titulo || 'Importada', responsable: row.responsable || '', fechaInicio: row.fechaInicio || new Date().toISOString().split('T')[0], fechaFin: row.fechaFin || new Date().toISOString().split('T')[0], progreso: row.progreso || 0, estado: row.estado || 'Pendiente', prioridad: row.prioridad || 'Media', descripcion: row.descripcion || '',
+                            subprocesos: row.subprocesos ? row.subprocesos.split(', ').map(s => { const m = s.match(/^(.*) \((OK|X)\)$/); return m ? { text: m[1], done: m[2] === 'OK' } : { text: s, done: false }; }) : []
+                        }));
+                        setTasks(prev => [...prev, ...parsedTasks]);
+                        addToast(`Importadas ${parsedTasks.length} tareas`);
+                    } catch (error) { alert("Error al leer Excel."); }
+                };
+                reader.readAsArrayBuffer(file);
+                e.target.value = '';
+            };
+
+            // --- Excel API (Solo funciona en Panel) ---
+            const loadFromExcelAddin = async () => {
+                if (!officeReady || isPopupMode) return;
+                setIsSyncing(true);
+                setSyncStatus('Leyendo Excel...');
+                try {
+                    await Excel.run(async (context) => {
+                        let sheet = context.workbook.worksheets.getItemOrNullObject('Cronograma');
+                        await context.sync();
+                        if (sheet.isNullObject) {
+                            sheet = context.workbook.worksheets.add('Cronograma');
+                            await context.sync();
+                        }
+                        const range = sheet.getUsedRangeOrNullObject();
+                        range.load(['values', 'rowCount']);
+                        await context.sync();
+
+                        if (range.isNullObject || range.rowCount < 2) {
+                            // setTasks([]); // Opcional: limpiar si está vacío
+                            setSyncStatus('Hoja vacía o nueva.');
+                            return;
+                        }
+
+                        const [headerRow, ...dataRows] = range.values;
+                        const headerMap = {};
+                        headerRow.forEach((h, i) => headerMap[normalizeHeader(h)] = i);
+
+                        const parsedTasks = dataRows
+                            .filter(r => r.some(c => String(c || '').trim() !== ''))
+                            .map(r => mapRowToTask(r, headerMap));
+
+                        setTasks(parsedTasks);
+                        setSyncStatus('Sincronizado');
+                        setLastSyncAt(new Date());
+                        addToast("Datos cargados de Excel");
+                    });
+                } catch (error) {
+                    console.error(error);
+                    setSyncStatus('Error de lectura');
+                } finally { setIsSyncing(false); }
+            };
+
+            const saveToExcelAddin = async () => {
+                if (!officeReady || isPopupMode) return;
+                setIsSyncing(true);
+                setSyncStatus('Guardando...');
+                try {
+                    await Excel.run(async (context) => {
+                        let sheet = context.workbook.worksheets.getItemOrNullObject('Cronograma');
+                        await context.sync();
+                        if (sheet.isNullObject) {
+                            sheet = context.workbook.worksheets.add('Cronograma');
+                            await context.sync();
+                        }
+                        // Limpiar y reescribir
+                        sheet.getRange().clear();
+                        
+                        const rows = [
+                            EXCEL_HEADERS,
+                            ...tasks.map(t => [t.id, t.titulo, t.responsable, t.fechaInicio, t.fechaFin, t.progreso, t.estado, t.prioridad, t.descripcion, serializeSubprocesses(t.subprocesos)])
+                        ];
+
+                        const range = sheet.getRangeByIndexes(0, 0, rows.length, EXCEL_HEADERS.length);
+                        range.values = rows;
+                        range.format.autofitColumns();
+                        
+                        // Tabla bonita
+                        const tableRange = sheet.getRangeByIndexes(0, 0, rows.length, EXCEL_HEADERS.length);
+                        // sheet.tables.add(tableRange, true); // Opcional: Crear tabla Excel real
+
+                        await context.sync();
+                        setSyncStatus('Guardado en Excel');
+                        setLastSyncAt(new Date());
+                        // Actualizamos el broadcast para que el popup sepa que ya se guardó
+                        broadcastState();
+                    });
+                } catch (error) {
+                    console.error(error);
+                    setSyncStatus('Error al guardar');
+                } finally { setIsSyncing(false); }
+            };
+
+            // Auto-sync effect
+            useEffect(() => {
+                if (!officeReady || !autoSync || isPopupMode || isSyncing) return;
+                const timeout = setTimeout(() => { saveToExcelAddin(); }, 1500); // Debounce
+                return () => clearTimeout(timeout);
+            }, [tasks, officeReady, autoSync, isPopupMode]);
+
+            const filteredTasks = tasks.filter(t => filter === 'Todos' || t.estado === filter);
+            const lastSyncLabel = lastSyncAt ? lastSyncAt.toLocaleTimeString() : '--:--';
+
+            return (
+                <div className="min-h-screen pb-10 bg-gray-50 dark:bg-slate-900">
+                    <ToastContainer toasts={toasts} />
+                    
+                    {/* Header */}
+                    <header className={`bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-40 border-b border-gray-200 dark:border-slate-700 ${isPopupMode ? 'border-t-4 border-t-purple-500' : 'border-t-4 border-t-brand-500'}`}>
+                        <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-3 w-full md:w-auto">
+                                <div className={`p-2 rounded-lg text-white ${isPopupMode ? 'bg-purple-600' : 'bg-brand-600'}`}>
+                                    {isPopupMode ? <Icons.Monitor /> : <Icons.CheckSquare />}
+                                </div>
+                                <div>
+                                    <h1 className="text-lg font-bold text-gray-800 dark:text-white leading-tight">Cronograma SPRC</h1>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        {isPopupMode ? 'Modo Remoto (Controlando Excel)' : officeReady ? 'Conectado a Excel Online' : 'Modo Local'}
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+                                <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition text-gray-600 dark:text-gray-300">{darkMode ? <Icons.Sun /> : <Icons.Moon />}</button>
+                                
+                                {!isPopupMode && (
+                                    <button onClick={openConnectedPopup} className="hidden md:inline-flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 transition" title="Abrir control remoto">
+                                        <Icons.ExternalLink size={16} /> Ventana
+                                    </button>
+                                )}
+                                
+                                <div className="h-6 w-px bg-gray-300 dark:bg-slate-700 mx-1"></div>
+
+                                {!isPopupMode && (
+                                    <>
+                                        <button onClick={loadFromExcelAddin} disabled={!officeReady} className={`p-2 rounded transition ${officeReady ? 'hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-300' : 'text-gray-300 cursor-not-allowed'}`} title="Cargar de Excel"><Icons.Download /></button>
+                                        <button onClick={saveToExcelAddin} disabled={!officeReady} className={`p-2 rounded transition ${officeReady ? 'hover:bg-gray-100 dark:hover:bg-slate-700 text-brand-600' : 'text-gray-300 cursor-not-allowed'}`} title="Forzar Guardado"><Icons.Save /></button>
+                                    </>
+                                )}
+
+                                <button onClick={() => openModal()} className="bg-brand-600 text-white px-4 py-2 rounded-lg hover:bg-brand-700 transition flex items-center gap-2 shadow-lg shadow-brand-500/30 whitespace-nowrap ml-2"><Icons.Plus /> <span className="hidden sm:inline">Nueva Tarea</span></button>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="max-w-7xl mx-auto px-4 py-6">
+                        {/* Barra de Estado */}
+                        <div className="mb-6 flex flex-wrap gap-4 items-center justify-between text-xs text-gray-500 dark:text-gray-400 bg-white dark:bg-slate-800 p-3 rounded-lg border border-gray-100 dark:border-slate-700 shadow-sm">
+                            <div className="flex items-center gap-4">
+                                <span className={`flex items-center gap-1.5 ${syncStatus.includes('Error') ? 'text-red-500' : 'text-green-600'}`}>
+                                    <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-yellow-400 animate-pulse' : 'bg-current'}`}></span>
+                                    {syncStatus || 'Listo'}
+                                </span>
+                                <span>Ult. Sync: {lastSyncLabel}</span>
+                            </div>
+                            {!isPopupMode && (
+                                <label className="flex items-center gap-2 cursor-pointer hover:text-brand-600 transition">
+                                    <input type="checkbox" checked={autoSync} onChange={(e) => setAutoSync(e.target.checked)} disabled={!officeReady} className="rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                                    <span>Auto-guardar en Excel</span>
+                                </label>
+                            )}
+                        </div>
+
+                        {/* Filtros y Vistas */}
+                        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                            <div className="flex gap-2 overflow-x-auto pb-1 w-full md:w-auto scrollbar-hide">
+                                {['Todos', 'Pendiente', 'En Progreso', 'Completado', 'Pausado'].map(f => (
+                                    <button key={f} onClick={() => setFilter(f)} className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${filter === f ? 'bg-brand-600 text-white shadow-md' : 'bg-white dark:bg-slate-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700'}`}>{f}</button>
+                                ))}
+                            </div>
+                            <div className="bg-white dark:bg-slate-800 p-1 rounded-lg border border-gray-200 dark:border-slate-700 flex gap-1 shadow-sm">
+                                <button onClick={() => setViewMode('list')} className={`p-2 rounded transition ${viewMode === 'list' ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700'}`} title="Lista"><Icons.LayoutGrid /></button>
+                                <button onClick={() => setViewMode('gantt')} className={`p-2 rounded transition ${viewMode === 'gantt' ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-700'}`} title="Gantt"><Icons.BarChart3 /></button>
+                            </div>
+                        </div>
+
+                        {/* Grid de Tareas */}
+                        {viewMode === 'list' ? (
+                            filteredTasks.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {filteredTasks.map(task => (
+                                        <TaskCard 
+                                            key={task.id} 
+                                            task={task} 
+                                            onEdit={openModal} 
+                                            onRequestDelete={initiateDelete} // Usamos initiateDelete en lugar de borrar directo
+                                            onToggleSubprocess={handleToggleSubprocess}
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-20 opacity-50"><Icons.CheckSquare size={48} className="mx-auto mb-4 text-gray-300" /><p>No hay tareas en esta vista</p></div>
+                            )
+                        ) : (
+                            <GanttView tasks={filteredTasks} onEdit={openModal} />
+                        )}
+                    </div>
+
+                    {/* Modales */}
+                    <TaskModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSave={handleSaveTask} taskToEdit={editingTask}/>
+                    
+                    <ConfirmModal 
+                        isOpen={deleteModalOpen}
+                        title="¿Eliminar Tarea?"
+                        message={`Estás a punto de eliminar "${taskToDelete?.titulo}". Esta acción no se puede deshacer y se borrará de Excel.`}
+                        onConfirm={confirmDelete}
+                        onCancel={() => setDeleteModalOpen(false)}
+                    />
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
